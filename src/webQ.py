@@ -23,7 +23,7 @@ def get_queues():
     return qs
 
 app.queues = get_queues()
-app.gone = leveldb.Connect(os.path.join(app.config['DATAPATH'], 'gone.ldb'))
+app.gone = leveldb.LevelDB(os.path.join(app.config['DATAPATH'], 'gone.ldb'))
 
 """
 lib
@@ -76,7 +76,7 @@ def put_queue(queue):
     app.gone.Delete(key)
     app.queues[queue].push(make_data(request.form['key'], request.files['value'].read()))
 
-@app.route('/lenq/<queue>', methods=['GET']):
+@app.route('/lenq/<queue>', methods=['GET'])
 def len_queue(queue):
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
@@ -95,7 +95,7 @@ def get_keys():
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
     
-    return Response(json.dumps(dict([(read_item(x) for x in app.gone.RangeIter()])), mimetype='application/json')
+    return Response(json.dumps(dict([read_item(x) for x in app.gone.RangeIter()])), mimetype='application/json')
 
 @app.route('/nrgone/', methods=['GET'])
 def get_nrkeys():
@@ -103,3 +103,6 @@ def get_nrkeys():
         abort(403)
     
     return sum(1 for _ in app.gone.RangeIter())
+
+if __name__ == '__main__':
+    app.run()
