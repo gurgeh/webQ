@@ -5,11 +5,17 @@ import struct
 from queuelib import FifoDiskQueue
 import leveldb
 
+from qlient import make_data, read_item
+
 from flask import Flask, Response
 app = Flask(__name__)
 app.config.from_envvar('WEBQ_SETTINGS')
 
 QEXT = '.q'
+
+"""
+put to db (maybe mongo)
+"""
 
 def get_qfname(qname):
     return os.path.join(app.config['DATAPATH'], '%s.q' % qname)
@@ -25,26 +31,7 @@ def get_queues():
 app.queues = get_queues()
 app.gone = leveldb.LevelDB(os.path.join(app.config['DATAPATH'], 'gone.ldb'))
 
-"""
-lib
-"""
-
 OK_NAME = re.compile('[\w\d_-]+')
-
-def read_pack(x):
-    ln = struct.unpack('q', x[:8])[0]
-    return x[8:8+ln], ln
-
-def read_key(x):
-    return read_pack(x)[0]
-
-def read_item(x):
-    key, ln = read_pack()
-    return key, x[ln:]
-
-def make_data(key, val):
-    s = struct.pack('q', len(key))
-    return s + key + val
 
 @app.route('/q/<queue>', methods=['GET'])
 def get_queue(queue):
@@ -61,7 +48,26 @@ def get_queue(queue):
     key = read_key(x)
     app.gone.Put(key, x)
     return Response(x, mimetype='application/octet-stream')
-    
+
+@app.route('/q/<queue>/<n>', methods=['GET'])
+def get_queues(queue, n):
+    if request.form['sig'] != app.config['SECRET']:
+        abort(403)
+
+    if queue not in app.queues:
+        abort(400)
+
+    ret = []
+    for _ in xrange(n):
+        x = app.queues[queue].pop()
+        if x is None:
+            break
+        key,val = read_item(x)
+        app.gone.Put(key, x)
+        ret.append(make_data(key, val, True))
+
+    return Response(''.join(x), mimetype='application/octet-stream')
+
 
 @app.route('/q/<queue>', methods=['PUT'])
 def put_queue(queue):
@@ -74,7 +80,7 @@ def put_queue(queue):
         app.queues[queue] = FifoDiskQueue(get_qfname(queue))
 
     app.gone.Delete(key)
-    app.queues[queue].push(make_data(request.form['key'], request.files['value'].read()))
+    app.queues[queue].push(make_data(request.form['key'], request.form['value'].read()))
 
 @app.route('/lenq/<queue>', methods=['GET'])
 def len_queue(queue):
@@ -83,12 +89,12 @@ def len_queue(queue):
         
     return len(app.queues[queue])
     
-@app.route('/gone/<key>', methods=['DELETE'])
-def clean(key):
+@app.route('/gone/', methods=['DELETE'])
+def clean():
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
-
-    app.gone.Delete(key)
+        
+    app.gone.Delete(request.form['key'])
 
 @app.route('/gone/', methods=['GET'])
 def get_keys():
