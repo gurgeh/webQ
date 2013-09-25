@@ -1,0 +1,45 @@
+Name switch
+
+Add db
+Put batch
+server statistics
+Control webpage
+server filters/triggers on put
+http interface for asking about subsystems
+command driven interface
+check if compressed files are sent that small or escaped
+encryption
+use external queue server (Redis + Mongo for different workloads? Same for db)
+redundancy
+file storage?
+event server?
+SQL support?
+Some sort of client computer load balancing?
+
+Client lib:
+  local name
+
+Client agent interface:
+  remote config
+  regular status/stats check ins
+  health monitoring
+  private cron
+  batch logs
+  testability
+  remote control (restart, stop, predefined commands)
+  remote updates after unit tests
+  local interface (command driven)
+  concurrent network
+
+FeudalLord agent:
+  Tracks each computer
+  Knows how to start services and agents
+  
+ComputerHealth agent:
+  Checks disk, Raid, RAM, IDS, utilization, maybe dmesg and other stuff.
+
+Packages
+
+Crawler package
+
+Faster language?
