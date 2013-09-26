@@ -4,6 +4,8 @@ Add db
 Put batch
 server statistics
 Control webpage
+Unit tests
+Documentation
 server filters/triggers on put
 http interface for asking about subsystems
 command driven interface

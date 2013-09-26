@@ -15,6 +15,7 @@ QEXT = '.q'
 
 """
 put to db (maybe mongo)
+logging
 """
 
 def get_qfname(qname):
@@ -49,8 +50,9 @@ def get_queue(queue):
     app.gone.Put(key, x)
     return Response(x, mimetype='application/octet-stream')
 
-@app.route('/q/<queue>/<n>', methods=['GET'])
-def get_queues(queue, n):
+
+@app.route('/mq/<queue>/<n>', methods=['GET'])
+def getn_queue(queue, n):
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
 
@@ -80,8 +82,25 @@ def put_queue(queue):
         app.queues[queue] = FifoDiskQueue(get_qfname(queue))
 
     app.gone.Delete(key)
-    app.queues[queue].push(make_data(request.form['key'], request.form['value'].read()))
+    app.queues[queue].push(make_data(request.form['key'], request.form['value']))
 
+    
+@app.route('/mq/<queue>', methods=['PUT'])
+def putn_queue(queue, n):
+    if request.form['sig'] != app.config['SECRET']:
+        abort(403)
+        
+    items = cPickle.loads(lzma.decompress(request.form['items']))
+
+    if queue not in app.queues:
+        if not OK_NAME.match(queue):
+            abort(403)
+        app.queues[queue] = FifoDiskQueue(get_qfname(queue))
+    
+    for key, val in items:
+        app.queues[queue].push(make_data(key, val))
+
+        
 @app.route('/lenq/<queue>', methods=['GET'])
 def len_queue(queue):
     if request.form['sig'] != app.config['SECRET']:
