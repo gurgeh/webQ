@@ -1,4 +1,6 @@
 import cPickle
+import struct
+import json
 
 import requests
 
@@ -35,60 +37,66 @@ def make_data(key, val, elem=False):
     return ''.join([s1, key, s2, val])
 
 """
-db put
+manual test
+ get many
+ get gone
+ clean gone
 
-test
-agent
-remote_config
-
-test
-qrawler
+real tests
 """
 
 class Qlient:
     def __init__(self, host, queue, name, secret):
         self.host = host
         self.queue = queue
+        self.name = name
         self.secret = secret
 
-    def call(self, method, path, params, files):
+    def call(self, method, path, params=None):
+        if params is None:
+            params = {}
         params.update({'sig':self.secret, 'name':self.name})
-        return getattr(requests, method)(self.host + path, params=params)
+        res = getattr(requests, method)(self.host + path, data=params)
+        if res.status_code != 200:
+            raise AssertionError, res.status_code
+        return res
 
-    def dbput(self, table, key, val):
-        zval = lzma.compress(cPickle.dumps(items))
-        self.call('put', '/db/%s' % table, {'key':key, 'value': zval})
+    def bigcall(self, method, path, data):
+        res = getattr(requests, method)(self.host + path, data=data, headers={'content-type': 'application/lzma'}, params={'sig':self.secret, 'name':self.name})
+        if res.status_code != 200:
+            raise AssertionError, res.status_code
+        return res
     
-    def put(self, key, val):
-        zval = lzma.compress(val)
-        self.call('put', '/q/%s' % self.queue, params={'key':key, 'value': zval})
+    def dbput(self, table, doc): # doc may be a list of docs
+        zdoc = lzma.compress(cPickle.dumps(doc))
+        self.bigcall('put', '/db/%s' % table, zdoc)
 
-
-    def put_n(self, items):
-        zitems = lzma.compress(cPickle.dumps(items))
-        self.call('put', '/mq/%s/' % self.queue, params={'items': zitems})
+    def dbget(self, table, key):
+        return self.call('get', '/db/%s' % table, {'key':key}).json
         
-    def get(self):
-        res = self.call('get', '/q/%s' % self.queue)
-        key, val = read_item(res.content)
-        return key, lzma.decompress(val)
-
-    def get_n(self, n):
-        res = self.call('get', '/mq/%s/%d' % (self.queue, n))
+    def put(self, items):
+        zitems = lzma.compress(cPickle.dumps(items))
+        self.bigcall('put', '/q/%s' % self.queue, data=zitems)
+    
+    def get(self, n=1):
+        res = self.call('post', '/q/%s/%d' % (self.queue, n))
         for x in read_elems(res.content):
             yield x
 
     def qlen(self):
         res = self.call('get', '/lenq/%s' % self.queue)
-        return int(res.text)
+        return res.json['length']
         
     def clean(self, key):
         self.call('delete', '/gone/', params={'key': key})
 
+    def clean_many(self, keys):
+        self.call('delete', '/gone/', params={'keys': keys})
+
     def get_keys(self):
         res = self.call('get', '/gone/')
-        return res.json()
+        return res.json
 
     def nr_keys(self):
         res = self.call('get', '/nrgone/')
-        return int(res.text)
+        return res.json['count']

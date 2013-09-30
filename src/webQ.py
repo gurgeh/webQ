@@ -1,20 +1,22 @@
+import cPickle
 import os
 import re
-import struct
+import json
 
+from backports import lzma
 from queuelib import FifoDiskQueue
-import leveldb
+from pymongo import MongoClient
 
 from qlient import make_data, read_item
 
-from flask import Flask, Response
+from flask import Flask, Response, jsonify, request
 app = Flask(__name__)
 app.config.from_envvar('WEBQ_SETTINGS')
+
 
 QEXT = '.q'
 
 """
-put to db (maybe mongo)
 logging
 """
 
@@ -30,29 +32,34 @@ def get_queues():
     return qs
 
 app.queues = get_queues()
-app.gone = leveldb.LevelDB(os.path.join(app.config['DATAPATH'], 'gone.ldb'))
+app.db = MongoClient().webQ
+app.gone = app.db['gone']
 
 OK_NAME = re.compile('[\w\d_-]+')
 
-@app.route('/q/<queue>', methods=['GET'])
-def get_queue(queue):
+@app.route('/db/<table>', methods=['PUT'])
+def put_db(table):
+    if request.args['sig'] != app.config['SECRET']:
+        abort(403)
+
+    doc = cPickle.loads(lzma.decompress(request.data))
+
+    app.db[table].insert(doc) #doc may be a list
+
+    return ''
+
+@app.route('/db/<table>', methods=['GET'])
+def get_db(table):
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
 
-    if queue not in app.queues:
-        abort(400)
+    key = request.form['key']
 
-    x = app.queues[queue].pop()
-    if x is None:
-        return ''
-
-    key = read_key(x)
-    app.gone.Put(key, x)
-    return Response(x, mimetype='application/octet-stream')
+    return jsonify(**app.db[table].find_one({"_id": key}))
 
 
-@app.route('/mq/<queue>/<n>', methods=['GET'])
-def getn_queue(queue, n):
+@app.route('/q/<queue>/<n>', methods=['POST'])
+def getn_queue(queue, n=1):
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
 
@@ -60,12 +67,12 @@ def getn_queue(queue, n):
         abort(400)
 
     ret = []
-    for _ in xrange(n):
+    for _ in xrange(int(n)):
         x = app.queues[queue].pop()
         if x is None:
             break
         key,val = read_item(x)
-        app.gone.Put(key, x)
+        app.gone.insert({'_id':key, 'data':x})
         ret.append(make_data(key, val, True))
 
     return Response(''.join(x), mimetype='application/octet-stream')
@@ -73,7 +80,7 @@ def getn_queue(queue, n):
 
 @app.route('/q/<queue>', methods=['PUT'])
 def put_queue(queue):
-    if request.form['sig'] != app.config['SECRET']:
+    if request.args['sig'] != app.config['SECRET']:
         abort(403)
 
     if queue not in app.queues:
@@ -81,24 +88,16 @@ def put_queue(queue):
             abort(403)
         app.queues[queue] = FifoDiskQueue(get_qfname(queue))
 
-    app.gone.Delete(key)
-    app.queues[queue].push(make_data(request.form['key'], request.form['value']))
+    #if 'key' in request.form:
+    #    items = [(request.form['key'], request.form['value'])]
+    #else:
+    items = cPickle.loads(lzma.decompress(request.data))
 
-    
-@app.route('/mq/<queue>', methods=['PUT'])
-def putn_queue(queue, n):
-    if request.form['sig'] != app.config['SECRET']:
-        abort(403)
-        
-    items = cPickle.loads(lzma.decompress(request.form['items']))
-
-    if queue not in app.queues:
-        if not OK_NAME.match(queue):
-            abort(403)
-        app.queues[queue] = FifoDiskQueue(get_qfname(queue))
-    
     for key, val in items:
+        app.gone.remove({'_id':key})
         app.queues[queue].push(make_data(key, val))
+
+    return ''
 
         
 @app.route('/lenq/<queue>', methods=['GET'])
@@ -106,28 +105,40 @@ def len_queue(queue):
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
         
-    return len(app.queues[queue])
+    return jsonify(length=len(app.queues[queue]))
     
 @app.route('/gone/', methods=['DELETE'])
 def clean():
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
-        
-    app.gone.Delete(request.form['key'])
+
+    if 'key' in request.form:
+        keys = [request.form['key']]
+    else:
+        keys = request.form['keys']
+
+    for key in keys:
+        app.gone.remove({'_id': key})
+
+    return ''
 
 @app.route('/gone/', methods=['GET'])
 def get_keys():
+    print request.form
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
     
-    return Response(json.dumps(dict([read_item(x) for x in app.gone.RangeIter()])), mimetype='application/json')
+    return jsonify(**dict([read_item(x['data']) for x in app.gone.find()]))
 
 @app.route('/nrgone/', methods=['GET'])
 def get_nrkeys():
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
     
-    return sum(1 for _ in app.gone.RangeIter())
+    return jsonify(count=app.gone.count())
 
 if __name__ == '__main__':
+    app.debug = True
     app.run()
+
+        
