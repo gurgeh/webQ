@@ -2,6 +2,7 @@ import cPickle
 import os
 import re
 import json
+import time
 
 from backports import lzma
 from pymongo import MongoClient
@@ -13,14 +14,31 @@ app.config.from_envvar('WEBQ_SETTINGS')
 
 QEXT = '.q'
 
-"""
-logging
-"""
-
 app.db = MongoClient().webQ
 app.gone = app.db['_gone']
 
 OK_NAME = re.compile('[\w\d_-]+')
+
+@app.route('/log/<fname>', methods=['PUT'])
+def put_log(fname):
+    if request.form['sig'] != app.config['SECRET']:
+        abort(403)
+
+    if '/' in fname or '.' in fname:
+        abort(400)
+
+    logs, skipped = json.loads(request.form['logs'])
+        
+    f = open(os.path.join(app.config['LOG_PATH'], fname + '.log'), 'at')
+    for t, level, mess in logs:
+        f.write('%s - %s - %s' % (time.strftime('%y%m%d %H:%M:%S', time.localtime(t)), level, mess))
+        f.write('\n')
+    if skipped:
+        f.write('skipped %d entries' % skipped)
+    f.close()
+
+    return ''
+    
 
 @app.route('/db/<table>', methods=['PUT'])
 def put_db(table):
@@ -29,7 +47,7 @@ def put_db(table):
 
     doc = cPickle.loads(lzma.decompress(request.data))
 
-    app.db[table].insert(doc) #doc may be a list
+    app.db[table].update({'_id': doc['_id']}, doc, upsert=True) #doc may be a list
 
     return ''
 
@@ -40,7 +58,7 @@ def get_db(table):
 
     key = request.form['key']
 
-    return jsonify(**app.db[table].find_one({"_id": key}))
+    return jsonify(obj=app.db[table].find_one({"_id": key}))
 
 
 @app.route('/q/<queue>/<n>', methods=['POST'])
@@ -98,7 +116,7 @@ def clean():
     if 'key' in request.form:
         keys = [request.form['key']]
     else:
-        keys = request.form['keys']
+        keys = json.loads(request.form['keys'])
 
     for key in keys:
         app.gone.remove({'_id': key})
