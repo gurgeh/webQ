@@ -4,12 +4,9 @@ import re
 import json
 
 from backports import lzma
-from queuelib import FifoDiskQueue
 from pymongo import MongoClient
 
-from qlient import make_data, read_item
-
-from flask import Flask, Response, jsonify, request
+from flask import Flask, jsonify, request, make_response
 app = Flask(__name__)
 app.config.from_envvar('WEBQ_SETTINGS')
 
@@ -20,20 +17,8 @@ QEXT = '.q'
 logging
 """
 
-def get_qfname(qname):
-    return os.path.join(app.config['DATAPATH'], '%s.q' % qname)
-
-def get_queues():
-    qs = {}
-    for q in os.listdir(app.config['DATAPATH']):
-        if q.endswith(QEXT):
-            qname = q[:-len(QEXT)]
-            qs[qname] = FifoDiskQueue(get_qfname(qname))
-    return qs
-
-app.queues = get_queues()
 app.db = MongoClient().webQ
-app.gone = app.db['gone']
+app.gone = app.db['_gone']
 
 OK_NAME = re.compile('[\w\d_-]+')
 
@@ -63,19 +48,21 @@ def getn_queue(queue, n=1):
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
 
-    if queue not in app.queues:
-        abort(400)
-
     ret = []
     for _ in xrange(int(n)):
-        x = app.queues[queue].pop()
+        x = app.db[queue].find_one()
         if x is None:
             break
-        key,val = read_item(x)
-        app.gone.insert({'_id':key, 'data':x})
-        ret.append(make_data(key, val, True))
 
-    return Response(''.join(x), mimetype='application/octet-stream')
+        idx = {'_id': x['_id']}
+        app.gone.update(idx, x, upsert=True)
+        app.db[queue].remove(idx)
+        
+        ret.append(x)
+
+    res = make_response(lzma.compress(cPickle.dumps(ret)))
+    res.mimetype = 'application/octet-stream'
+    return res
 
 
 @app.route('/q/<queue>', methods=['PUT'])
@@ -83,30 +70,26 @@ def put_queue(queue):
     if request.args['sig'] != app.config['SECRET']:
         abort(403)
 
-    if queue not in app.queues:
-        if not OK_NAME.match(queue):
-            abort(403)
-        app.queues[queue] = FifoDiskQueue(get_qfname(queue))
+    if not OK_NAME.match(queue):
+        abort(403)
 
-    #if 'key' in request.form:
-    #    items = [(request.form['key'], request.form['value'])]
-    #else:
     items = cPickle.loads(lzma.decompress(request.data))
 
-    for key, val in items:
-        app.gone.remove({'_id':key})
-        app.queues[queue].push(make_data(key, val))
+    for x in items:
+        idx = {'_id': x['_id']}
+        app.gone.remove(idx)
+        app.db[queue].update(idx, x, upsert=True)
 
     return ''
 
-        
+
 @app.route('/lenq/<queue>', methods=['GET'])
 def len_queue(queue):
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
         
-    return jsonify(length=len(app.queues[queue]))
-    
+    return jsonify(length=app.db[queue].count())
+
 @app.route('/gone/', methods=['DELETE'])
 def clean():
     if request.form['sig'] != app.config['SECRET']:
@@ -124,11 +107,10 @@ def clean():
 
 @app.route('/gone/', methods=['GET'])
 def get_keys():
-    print request.form
     if request.form['sig'] != app.config['SECRET']:
         abort(403)
     
-    return jsonify(**dict([read_item(x['data']) for x in app.gone.find()]))
+    return jsonify(keys=[x['_id'] for x in app.gone.find()])
 
 @app.route('/nrgone/', methods=['GET'])
 def get_nrkeys():

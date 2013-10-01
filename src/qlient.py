@@ -1,48 +1,12 @@
 import cPickle
-import struct
 import json
 
 import requests
 
 from backports import lzma
 
-def read_pack(x, offset=0):
-    ln = struct.unpack('q', x[offset:offset + 8])[0]
-    return x[offset + 8:offset + 8 + ln], offset + 8 + ln
-
-def read_key(x, offset=0):
-    return read_pack(x, offset)[0]
-
-def read_item(x, offset=0):
-    key, offset = read_pack(offset)
-    return key, x[offset:]
-
-def read_elem(x, offset=0):
-    key, offset = read_pack(x, offset)
-    val, offset = read_pack(x, offset)
-    return key, val, offset
-
-def read_elems(x):
-    offset = 0
-    while offset < len(x):
-        key, val, offset = read_elem(x, offset)
-        yield key, val
-
-def make_data(key, val, elem=False):
-    s1 = struct.pack('q', len(key))
-    s2 = ''
-    if elem:
-        s2 = struct.pack('q', len(val))
-        
-    return ''.join([s1, key, s2, val])
-
 """
-manual test
- get many
- get gone
- clean gone
-
-real tests
+unittests
 """
 
 class Qlient:
@@ -80,12 +44,12 @@ class Qlient:
     
     def get(self, n=1):
         res = self.call('post', '/q/%s/%d' % (self.queue, n))
-        for x in read_elems(res.content):
+        for x in cPickle.loads(lzma.decompress(res.content)):
             yield x
 
     def qlen(self):
         res = self.call('get', '/lenq/%s' % self.queue)
-        return res.json['length']
+        return res.json()['length']
         
     def clean(self, key):
         self.call('delete', '/gone/', params={'key': key})
@@ -95,8 +59,8 @@ class Qlient:
 
     def get_keys(self):
         res = self.call('get', '/gone/')
-        return res.json
+        return res.json()['keys']
 
     def nr_keys(self):
         res = self.call('get', '/nrgone/')
-        return res.json['count']
+        return res.json()['count']
