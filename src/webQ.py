@@ -137,6 +137,18 @@ def get_nrkeys():
     
     return jsonify(count=app.gone.count())
 
+@app.route('/info/', methods=['GET'])
+def get_info():
+    if request.form['sig'] != app.config['SECRET']:
+        abort(403)
+
+    colls = app.db.collection_names()
+    ret = {}
+    for coll in colls:
+        ret[coll] = app.db[coll].count()
+
+    return jsonify(**ret)
+
 if __name__ == '__main__':
     app.debug = True
     app.run()

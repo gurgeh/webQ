@@ -1,11 +1,13 @@
 import cPickle
 import json
+import time
 
 import requests
 
 from backports import lzma
 
 """
+
 unittests
 """
 
@@ -15,6 +17,7 @@ class Qlient:
         self.queue = queue
         self.name = name
         self.secret = secret
+        self.alive = True
 
     def call(self, method, path, params=None):
         if params is None:
@@ -68,7 +71,11 @@ class Qlient:
         return res.json()['count']
 
     def log(self, fname, logs, skipped):
-        self.call('put', '/log/%s'%fname, params={'logs': json.dumps((logs, skipped))})
+        self.call('put', '/log/%s' % fname, params={'logs': json.dumps((logs, skipped))})
+
+    def get_info(self):
+        res = self.call('get', '/info/')
+        return res.json()
         
     def qloop(self, n=1, backoff=60):
         while True:
@@ -76,6 +83,34 @@ class Qlient:
             for x in self.get(n):
                 yield x
                 i += 1
+            if not self.alive:
+                break
             if i < n:
-                time.sleep(backoff)
-                
+                for _ in xrange(backoff):
+                    time.sleep(1)
+                    if not self.alive:
+                        break
+
+import sys
+                    
+if __name__ == '__main__':
+    command = sys.argv[1]
+    server = sys.argv[2]
+    pw = sys.argv[3]
+    q = Qlient(server, 'minion_config', 'command line', pw)
+    if command == 'list':
+        key = sys.argv[4]
+        print q.dbget('minion_config', key)
+    elif command == 'set':
+        key = sys.argv[4]
+        subkey = sys.argv[5]
+        val = eval(sys.argv[6])
+        x = q.dbget('minion_config', key)
+        if x is None:
+            x = {'_id': key}
+        print 'Old config:', x
+        x[subkey] = val
+        print 'New config:', x
+        q.dbput('minion_config', x)
+    elif command == 'info':
+        print q.get_info()
