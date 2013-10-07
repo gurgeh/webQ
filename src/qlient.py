@@ -23,13 +23,25 @@ class Qlient:
         if params is None:
             params = {}
         params.update({'sig':self.secret, 'name':self.name})
-        res = getattr(requests, method)(self.host + path, data=params)
+        while True:
+            try:
+                res = getattr(requests, method)(self.host + path, data=params)
+            except Exception, e:
+                print 'Qlient', str(e)
+                time.sleep(10)
+                continue
+            break
         if res.status_code != 200:
             raise AssertionError, res.status_code
         return res
 
     def bigcall(self, method, path, data):
-        res = getattr(requests, method)(self.host + path, data=data, headers={'content-type': 'application/lzma'}, params={'sig':self.secret, 'name':self.name})
+        try:
+            res = getattr(requests, method)(self.host + path, data=data, headers={'content-type': 'application/lzma'}, params={'sig':self.secret, 'name':self.name})
+        except Exception, e:
+            print 'Qlient - bigcall', str(e)
+            time.sleep(10)
+            continue
         if res.status_code != 200:
             raise AssertionError, res.status_code
         return res
