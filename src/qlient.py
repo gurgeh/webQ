@@ -40,8 +40,8 @@ class Qlient:
         return res
 
     def bigcall(self, method, path, data):
+        i = 0
         while True:
-            i = 0
             try:
                 res = getattr(requests, method)(self.host + path, data=data, headers={'content-type': 'application/lzma'}, params={'sig':self.secret, 'name':self.name})
             except Exception, e:
